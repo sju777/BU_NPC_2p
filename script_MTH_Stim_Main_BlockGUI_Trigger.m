@@ -19,6 +19,13 @@ clearvars; clc; %daqreset;
 % resulting sequence as a colored strip (blue = airpuff, red = audio,
 % purple = paired), hand-edit any individual trial's type in a table, and
 % save/load named presets of the block design.
+%
+% Each trial also gets its own randomized ITI (inter-trial interval),
+% drawn uniformly between a Min/Max ITI set in the GUI (default 22-40 s),
+% shown and hand-editable per trial in the same table. trial.ISI (below)
+% is now just the fixed-length stimulus window at the start of each
+% trial; trial.iti(iTrial) is that trial's actual total slot length (must
+% be >= trial.ISI) and varies trial to trial.
 
 % Current Setting TS21 organoid mice:
 % Amplitude 1.8 V; duration: 5s; ISI 10 s
@@ -45,16 +52,20 @@ folder.info='test';
 % | preTrialRecordTime (in s)
 % |
 % | %%%%%%%%% N repetitions %%%%%%%%%%%%
-% | %  Trial length: ISI (in s)        %
-% | %  Contains stimulus sequences,    %
-% | %  trial type varies per rep       %
+% | %  Trial length: iti(iTrial) (in s)%
+% | %  Contains a trial.ISI-long        %
+% | %  stimulus window, then baseline   %
+% | %  until the next trial starts      %
 % | %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % |
 % | postTrialRecordTime (in s)
 % |
 %\|/
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% trial.N is set by the block design GUI below (not fixed here).
+% trial.N and trial.iti (per-trial ITI, randomized between a Min/Max ITI
+% range) are set by the block design GUI below (not fixed here).
+% trial.ISI is the fixed length of the stimulus window at the start of
+% every trial - it must be <= the smallest trial.iti value.
 trial.ISI=5;% (in s) %20 long 5Hz,30sec
     %ephys: 10
 trial.backgroundTime=5;%20 long 5Hz,30sec
@@ -74,11 +85,11 @@ trial.postTrialRecordTime=0;% (in s) Extra recording
 trialType(1).name='airpuff';
 trialType(1).activeStimuli={'airpuff'};
 trialType(1).color=[0.15 0.35 0.85];           % blue
-trialType(1).triggerDuration=0.2;              % (in s)
+trialType(1).triggerDuration=0.4;              % (in s)
 trialType(2).name='audio';
 trialType(2).activeStimuli={'audio'};
 trialType(2).color=[0.85 0.15 0.15];           % red
-trialType(2).triggerDuration=0.4;              % (in s)
+trialType(2).triggerDuration=0.2;              % (in s)
 trialType(3).name='paired';
 trialType(3).activeStimuli={'airpuff','audio'};
 trialType(3).color=[0.55 0.15 0.65];           % purple
@@ -87,21 +98,26 @@ trialType(3).triggerDuration=0.6;              % (in s)
 %% Design stimulus block via GUI
 % Set the number of trials per block, then randomly assign 80% of trials
 % as 'paired' (airpuff+audio), 10% as 'airpuff' only, and 10% as 'audio'
-% only. The sequence is previewed as a colored strip and listed in an
-% editable table (blue = airpuff, red = audio, purple = paired) - change
-% the "Type" column of any row to hand-override that trial. Save/load
-% named presets of the block (trial count + per-trial type sequence) via
-% the Preset controls. Click "Use This Block" to accept the sequence and
-% continue the script.
-[trial.N, trial.labels] = designStimBlockGUI(trialType, 30);
+% only, and randomize each trial's ITI uniformly between a Min/Max ITI
+% (default 22-40 s). The sequence is previewed as a colored strip and
+% listed in an editable table (blue = airpuff, red = audio, purple =
+% paired) - change the "Type" or "ITI (s)" column of any row to
+% hand-override that trial. Save/load named presets of the block (trial
+% count + per-trial type sequence + per-trial ITI) via the Preset
+% controls. Click "Use This Block" to accept the sequence and continue
+% the script.
+[trial.N, trial.labels, trial.iti] = designStimBlockGUI(trialType, 30, 22, 40, trial.ISI);
 if trial.N==0
     fprintf('\nBlock design cancelled by user. Aborting.\n');
     return
 end
 [~,trial.order]=ismember(trial.labels,{trialType.name}); % numeric index into trialType
+if any(trial.iti<trial.ISI)
+    error('Each trial''s ITI must be at least trial.ISI (%0.1f s) so the stimulus window fits within it.',trial.ISI)
+end
 
 % Derived from previous parameters
-run.tTotal=trial.backgroundTime+trial.N*trial.ISI+trial.postTrialRecordTime;
+run.tTotal=trial.backgroundTime+sum(trial.iti)+trial.postTrialRecordTime;
 
 %% Define stimulus parameters
 % Stimuli are defined per Analog Output Channel (ao0, ao1, ao2, ...)
@@ -183,10 +199,10 @@ device.inputChannel(2).name='everyFrame';
 device.outputRate=30E3; %(in Hz)
 device.outputChannel(1).id='ao0';
 device.outputChannel(1).name='audio';
-% device.outputChannel(1).type='Voltage';
+device.outputChannel(1).type='Voltage';
 device.outputChannel(2).id='ao1';
 device.outputChannel(2).name='airpuff';
-% device.outputChannel(2).type='Voltage';
+device.outputChannel(2).type='Voltage';
 device.outputChannel(3).id='port0/line0';
 device.outputChannel(3).name='trialTrigger';
 device.outputChannel(3).type='Digital';
@@ -208,7 +224,8 @@ run.VTrial=zeros(device.outputRate*trial.ISI,size(device.outputChannel,2));
 fprintf('\nBackground Imaging Time Before Stimulus:  %0.0f s', trial.backgroundTime)
 fprintf('\nPost-trial recording time:                %0.0f s', trial.postTrialRecordTime)
 fprintf('\nNumber of trials:                         %d', trial.N)
-fprintf('\nSingle trial duration:                    %0.0f s', trial.ISI)
+fprintf('\nStimulus window per trial:                %0.0f s', trial.ISI)
+fprintf('\nTrial ITI range:                           %0.0f-%0.0f s (mean %0.1f s)', min(trial.iti), max(trial.iti), mean(trial.iti))
 fprintf('\nTotal recording time:                     %0.0f s...', run.tTotal)
 for iStimulus=1:size(stimulus,2)
     tmpInd=find(strcmp({device.outputChannel.name},stimulus(iStimulus).name));
@@ -270,9 +287,13 @@ clearvars tmp* i*
 % continuous pulse whose WIDTH is 'trialType(iType).triggerDuration' (not
 % a multi-pulse train - see generateSinglePulse below), so each trial
 % type gets its own trigger pulse width. The full run waveform (run.VOut)
-% concatenates one ISI-length block per trial, in the order given by
+% concatenates one per-trial slot per trial, in the order given by
 % 'trial.order' (set by the block design GUI above), so airpuff-only,
-% audio-only, and paired trials are interleaved within the block.
+% audio-only, and paired trials are interleaved within the block. Each
+% trial's slot is trial.iti(iTrial) seconds long (that trial's randomized
+% ITI) - the trial.ISI-long stimulus content built above is placed at the
+% start of the slot, and the remainder is left at 0V/baseline until the
+% next trial starts.
 tmpTriggerInd=find(strcmp({stimulus.name},'trialTrigger'));
 tmpTriggerChannelInd=find(strcmp({device.outputChannel.name},'trialTrigger'));
 
@@ -291,13 +312,17 @@ for iType=1:size(trialType,2)
 end
 clearvars tmp*
 
-run.VOut=zeros(device.outputRate*trial.ISI*trial.N,size(device.outputChannel,2));
+tmpTrialSamples=round(trial.iti*device.outputRate); % samples per trial slot (varies per trial)
+run.VOut=zeros(sum(tmpTrialSamples),size(device.outputChannel,2));
+tmpRowStart=1;
 for iTrial=1:trial.N
-    tmpRows=(iTrial-1)*size(run.VTrial,1)+(1:size(run.VTrial,1));
-    run.VOut(tmpRows,:)=run.VTrialType{trial.order(iTrial)};
+    tmpContent=run.VTrialType{trial.order(iTrial)};
+    run.VOut(tmpRowStart:tmpRowStart+size(tmpContent,1)-1,:)=tmpContent;
+    tmpRowStart=tmpRowStart+tmpTrialSamples(iTrial);
 end
 clearvars tmp* i*
 fprintf('\nTrial type sequence (%s):     %s', strjoin({trialType.name},'/'), mat2str(trial.order))
+fprintf('\nTrial ITI sequence (s):       %s', mat2str(trial.iti,4))
 
 %% Define file name and check if file already exists.
 [~,~,~]=mkdir(fullfile(folder.root,folder.date,folder.animal,'trigger'));
@@ -396,7 +421,7 @@ end
 % fprintf('\nBackground Imaging Time Before Airpuff:  %0.0f s', trial.backgroundTime)
 % fprintf('\nPost-trial recording time:               %0.0f s', trial.postTrialRecordTime)
 % fprintf('\nNumber of trials:                        %d', trial.N)
-% fprintf('\nSingle trial duration:                   %0.0f s', trial.ISI)
+% fprintf('\nTrial ITI range:                          %0.0f-%0.0f s', min(trial.iti), max(trial.iti))
 % fprintf('\nTotal recording time:                    %0.0f s', run.tTotal)
 % 
 % %% Wait for user input
@@ -411,7 +436,7 @@ end
 % % run.VOut already contains the full block sequence (see 'Build
 % % per-trial-type waveforms...' above), so it is played once, not repeated.
 % start(handlerDeviceOutput)
-% pause(trial.N*trial.ISI)
+% pause(sum(trial.iti))
 % stop(handlerDeviceOutput)
 % fprintf('\nPost-trial recording time...')
 % pause(trial.postTrialRecordTime)
@@ -443,31 +468,39 @@ end
 v(tmpStartInd:tmpEndInd)=amplitude;
 end
 
-function [N, labels] = designStimBlockGUI(trialType, defaultN)
+function [N, labels, iti] = designStimBlockGUI(trialType, defaultN, defaultMinITI, defaultMaxITI, minAllowedITI)
 % Opens a GUI to set the block size, randomly assign trial types
-% (80% paired / 10% airpuff / 10% audio), hand-edit individual trials in
-% a table, preview the sequence as a colored grid, and save/load named
-% presets. Blocks (uiwait) until the user clicks "Use This Block" or
-% cancels. Returns N=0, labels={} if cancelled.
+% (80% paired / 10% airpuff / 10% audio), randomize each trial's ITI
+% uniformly between a Min/Max ITI, hand-edit individual trials (type or
+% ITI) in a table, preview the sequence as a colored grid, and save/load
+% named presets. Blocks (uiwait) until the user clicks "Use This Block"
+% or cancels. Returns N=0, labels={}, iti=[] if cancelled. minAllowedITI
+% is the smallest ITI allowed (must fit the trial.ISI stimulus window)
+% and is used as the Min ITI spinner's lower limit.
 typeNames={trialType.name};
 
-fig=uifigure('Name','Design Stimulus Block','Position',[80 80 1000 650]);
+fig=uifigure('Name','Design Stimulus Block','Position',[80 80 1000 690]);
 fig.CloseRequestFcn=@(src,~) cancelBlock(src);
 
-uilabel(fig,'Text','Number of trials in block:','Position',[20 605 190 22]);
-nTrialsField=uispinner(fig,'Position',[215 605 90 22],'Limits',[3 500],'Value',defaultN,'Step',1,'RoundFractionalValues','on');
-generateButton=uibutton(fig,'push','Text','Generate Block','Position',[315 605 130 22]);
-cancelButton=uibutton(fig,'push','Text','Cancel','Position',[750 605 100 22]);
-useBlockButton=uibutton(fig,'push','Text','Use This Block','Position',[860 605 120 22],'Enable','off');
+uilabel(fig,'Text','Number of trials in block:','Position',[20 655 190 22]);
+nTrialsField=uispinner(fig,'Position',[215 655 90 22],'Limits',[3 500],'Value',defaultN,'Step',1,'RoundFractionalValues','on');
+generateButton=uibutton(fig,'push','Text','Generate Block','Position',[315 655 130 22]);
+cancelButton=uibutton(fig,'push','Text','Cancel','Position',[750 655 100 22]);
+useBlockButton=uibutton(fig,'push','Text','Use This Block','Position',[860 655 120 22],'Enable','off');
 
-blockTable=uitable(fig,'Position',[20 130 300 460], ...
-    'ColumnName',{'Trial #','Type'}, ...
-    'ColumnEditable',[false true], ...
-    'ColumnFormat',{'numeric',typeNames}, ...
-    'ColumnWidth',{70,150}, ...
+uilabel(fig,'Text','Min ITI (s):','Position',[20 615 90 22]);
+minITIField=uispinner(fig,'Position',[110 615 90 22],'Limits',[minAllowedITI Inf],'Value',defaultMinITI,'Step',1,'RoundFractionalValues','on');
+uilabel(fig,'Text','Max ITI (s):','Position',[215 615 90 22]);
+maxITIField=uispinner(fig,'Position',[305 615 90 22],'Limits',[minAllowedITI Inf],'Value',defaultMaxITI,'Step',1,'RoundFractionalValues','on');
+
+blockTable=uitable(fig,'Position',[20 130 340 460], ...
+    'ColumnName',{'Trial #','Type','ITI (s)'}, ...
+    'ColumnEditable',[false true true], ...
+    'ColumnFormat',{'numeric',typeNames,'numeric'}, ...
+    'ColumnWidth',{60,110,80}, ...
     'RowName',{});
 
-ax=uiaxes(fig,'Position',[340 150 640 440]);
+ax=uiaxes(fig,'Position',[380 150 600 440]);
 ax.XTick=[]; ax.YTick=[];
 box(ax,'on');
 title(ax,'Trial sequence preview');
@@ -475,7 +508,7 @@ title(ax,'Trial sequence preview');
 for iType=1:numel(trialType)
     uilabel(fig,'Text',[char(9632) ' ' trialType(iType).name], ...
         'FontColor',trialType(iType).color,'FontWeight','bold', ...
-        'Position',[340+(iType-1)*140 100 140 22]);
+        'Position',[380+(iType-1)*140 100 140 22]);
 end
 
 uilabel(fig,'Text','Preset:','Position',[20 55 60 22]);
@@ -484,11 +517,14 @@ loadPresetButton=uibutton(fig,'push','Text','Load Preset','Position',[315 55 100
 savePresetButton=uibutton(fig,'push','Text','Save Preset','Position',[420 55 100 22]);
 deletePresetButton=uibutton(fig,'push','Text','Delete Preset','Position',[525 55 100 22]);
 
-fig.UserData.controls=struct('nTrialsField',nTrialsField,'table',blockTable,'ax',ax, ...
+fig.UserData.controls=struct('nTrialsField',nTrialsField,'minITIField',minITIField, ...
+    'maxITIField',maxITIField,'table',blockTable,'ax',ax, ...
     'useBlockButton',useBlockButton,'presetList',presetList);
 fig.UserData.trialType=trialType;
+fig.UserData.minAllowedITI=minAllowedITI;
 fig.UserData.labels={};
-fig.UserData.result=struct('N',0,'labels',{{}});
+fig.UserData.iti=[];
+fig.UserData.result=struct('N',0,'labels',{{}},'iti',[]);
 
 generateButton.ButtonPushedFcn = @(~,~) generateBlockCallback(fig);
 blockTable.CellEditCallback     = @(src,event) blockTableEditCallback(fig,event);
@@ -506,6 +542,7 @@ result=fig.UserData.result;
 delete(fig);
 N=result.N;
 labels=result.labels;
+iti=result.iti;
 end
 
 function d = presetDir()
@@ -534,9 +571,16 @@ end
 function generateBlockCallback(fig)
 % Randomly assigns trial types at the target fractions (80% paired, 10%
 % airpuff, 10% audio - 'paired' absorbs the rounding remainder so the
-% total always equals N), then refreshes the table and preview.
+% total always equals N), randomizes each trial's ITI uniformly between
+% Min/Max ITI, then refreshes the table and preview.
 c=fig.UserData.controls;
 N=round(c.nTrialsField.Value);
+minITI=c.minITIField.Value;
+maxITI=c.maxITIField.Value;
+if minITI>maxITI
+    uialert(fig,'Min ITI must not exceed Max ITI.','Invalid ITI range');
+    return
+end
 
 nAirpuff=round(0.1*N);
 nAudio=round(0.1*N);
@@ -545,7 +589,10 @@ nPaired=N-nAirpuff-nAudio; % remainder absorbed by 'paired', keeps total = N
 labels=[repmat({'airpuff'},1,nAirpuff),repmat({'audio'},1,nAudio),repmat({'paired'},1,nPaired)];
 labels=labels(randperm(N));
 
+iti=round(minITI+rand(1,N)*(maxITI-minITI)); % uniform random ITI per trial, whole seconds
+
 fig.UserData.labels=labels;
+fig.UserData.iti=iti;
 populateBlockTable(fig);
 drawBlockPreview(fig);
 c.useBlockButton.Enable='on';
@@ -554,15 +601,25 @@ end
 function populateBlockTable(fig)
 c=fig.UserData.controls;
 labels=fig.UserData.labels;
+iti=fig.UserData.iti;
 N=numel(labels);
-c.table.Data=[num2cell((1:N)'), labels(:)];
+c.table.Data=[num2cell((1:N)'), labels(:), num2cell(iti(:))];
 end
 
 function blockTableEditCallback(fig, event)
 row=event.Indices(1);
-labels=fig.UserData.labels;
-labels{row}=event.NewData;
-fig.UserData.labels=labels;
+col=event.Indices(2);
+switch col
+    case 2
+        labels=fig.UserData.labels;
+        labels{row}=event.NewData;
+        fig.UserData.labels=labels;
+    case 3
+        iti=fig.UserData.iti;
+        iti(row)=round(event.NewData); % keep ITIs as whole seconds
+        fig.UserData.iti=iti;
+        populateBlockTable(fig); % reflect the rounded value back into the table
+end
 drawBlockPreview(fig);
 end
 
@@ -570,6 +627,7 @@ function drawBlockPreview(fig)
 c=fig.UserData.controls;
 trialType=fig.UserData.trialType;
 labels=fig.UserData.labels;
+iti=fig.UserData.iti;
 typeNames={trialType.name};
 colorMap=cat(1,trialType.color);
 N=numel(labels);
@@ -598,16 +656,21 @@ hold(c.ax,'off');
 nAirpuff=sum(strcmp(labels,'airpuff'));
 nAudio=sum(strcmp(labels,'audio'));
 nPaired=sum(strcmp(labels,'paired'));
-title(c.ax,sprintf('%d trials: %d airpuff, %d audio, %d paired',N,nAirpuff,nAudio,nPaired));
+title(c.ax,{sprintf('%d trials: %d airpuff, %d audio, %d paired',N,nAirpuff,nAudio,nPaired), ...
+    sprintf('ITI %0.0f-%0.0f s (total %0.0f s)',min(iti),max(iti),sum(iti))});
 end
 
 function confirmBlock(fig)
-fig.UserData.result=struct('N',numel(fig.UserData.labels),'labels',{fig.UserData.labels});
+if any(fig.UserData.iti<fig.UserData.minAllowedITI)
+    uialert(fig,sprintf('All ITIs must be at least %0.1f s (the stimulus window length).',fig.UserData.minAllowedITI),'Invalid ITI');
+    return
+end
+fig.UserData.result=struct('N',numel(fig.UserData.labels),'labels',{fig.UserData.labels},'iti',fig.UserData.iti);
 uiresume(fig);
 end
 
 function cancelBlock(fig)
-fig.UserData.result=struct('N',0,'labels',{{}});
+fig.UserData.result=struct('N',0,'labels',{{}},'iti',[]);
 uiresume(fig);
 end
 
@@ -626,6 +689,7 @@ name=regexprep(strtrim(answer{1}),'[^\w\-]','_'); % sanitize for a filename
 preset=struct();
 preset.N=numel(labels);
 preset.labels=labels;
+preset.iti=fig.UserData.iti;
 
 d=presetDir();
 if ~exist(d,'dir')
@@ -655,13 +719,18 @@ if ~exist(fpath,'file')
     return
 end
 preset=load(fpath);
-if ~isfield(preset,'N') || ~isfield(preset,'labels')
-    uialert(fig,'Invalid preset file.','Cannot load preset','Icon','error');
+if ~isfield(preset,'N') || ~isfield(preset,'labels') || ~isfield(preset,'iti')
+    uialert(fig,'Invalid or outdated preset file (missing ITI data).','Cannot load preset','Icon','error');
+    return
+end
+if any(preset.iti<fig.UserData.minAllowedITI)
+    uialert(fig,sprintf('This preset has an ITI below %0.1f s (the stimulus window length) and cannot be loaded.',fig.UserData.minAllowedITI),'Cannot load preset','Icon','error');
     return
 end
 
 c.nTrialsField.Value=preset.N;
 fig.UserData.labels=preset.labels;
+fig.UserData.iti=preset.iti;
 populateBlockTable(fig);
 drawBlockPreview(fig);
 c.useBlockButton.Enable='on';
