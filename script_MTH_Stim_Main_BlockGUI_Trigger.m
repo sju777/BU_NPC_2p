@@ -115,14 +115,19 @@ run.tTotal=trial.backgroundTime+trial.N*trial.ISI+trial.postTrialRecordTime;
 %           delay           |       |       |       |       |       |
 % ---------------------------       ---------       ---------       -------
 %
+% 'trialTrigger' ends up as a single continuous HIGH pulse per trial (not
+% a multi-pulse train like 'rect' above) - its WIDTH is what encodes
+% trial type, via trialType(iType).triggerDuration and generateSinglePulse
+% (see "Build per-trial-type waveforms" below). 'pulseWidth'/'frequency'/
+% 'duration' below only build the placeholder single-trial template in
+% this section, which is fully overwritten per trial type further down -
+% they're irrelevant to the actual output.
 stimulus(3).name='trialTrigger';
 stimulus(3).type='rect';                % options: rect
 stimulus(3).delay=0;                    % delay (in s) from trial start to first pulse
-stimulus(3).pulseWidth=10e-3;           % width (in s) of individual pulses
-stimulus(3).frequency=1;                % frequency (in Hz) of pulse train
-stimulus(3).duration=1;                 % default duration of pulse train (in s) -
-                                         % overridden per trial type below by
-                                         % trialType(iType).triggerDuration
+stimulus(3).pulseWidth=10e-3;           % width (in s) of individual pulses (placeholder only)
+stimulus(3).frequency=1;                % frequency (in Hz) of pulse train (placeholder only)
+stimulus(3).duration=1;                 % duration of pulse train (placeholder only)
 stimulus(3).amplitude=1;                % logical level (1=high) - this channel is
                                          % a Digital output (port0/line0), not Voltage
 
@@ -261,13 +266,13 @@ clearvars tmp* i*
 % Each trial type only includes the stimuli listed in
 % 'trialType(iType).activeStimuli' (defined above); the other output
 % channel stays at 0V for that trial. The 'trialTrigger' channel is
-% present on every trial type, but its pulse train is regenerated here
-% using 'trialType(iType).triggerDuration' instead of the default
-% 'stimulus.duration', so each trial type gets its own trigger pulse-
-% train length. The full run waveform (run.VOut) concatenates one
-% ISI-length block per trial, in the order given by 'trial.order' (set
-% by the block design GUI above), so airpuff-only, audio-only, and
-% paired trials are interleaved within the block.
+% present on every trial type, but is regenerated here as a single
+% continuous pulse whose WIDTH is 'trialType(iType).triggerDuration' (not
+% a multi-pulse train - see generateSinglePulse below), so each trial
+% type gets its own trigger pulse width. The full run waveform (run.VOut)
+% concatenates one ISI-length block per trial, in the order given by
+% 'trial.order' (set by the block design GUI above), so airpuff-only,
+% audio-only, and paired trials are interleaved within the block.
 tmpTriggerInd=find(strcmp({stimulus.name},'trialTrigger'));
 tmpTriggerChannelInd=find(strcmp({device.outputChannel.name},'trialTrigger'));
 
@@ -280,9 +285,8 @@ for iType=1:size(trialType,2)
             tmpV(:,tmpInd)=run.VTrial(:,tmpInd);
         end
     end
-    tmpV(:,tmpTriggerChannelInd)=generateRectPulseTrain(size(run.VTrial,1),device.outputRate, ...
-        stimulus(tmpTriggerInd).delay,stimulus(tmpTriggerInd).pulseWidth,stimulus(tmpTriggerInd).frequency, ...
-        trialType(iType).triggerDuration,stimulus(tmpTriggerInd).amplitude);
+    tmpV(:,tmpTriggerChannelInd)=generateSinglePulse(size(run.VTrial,1),device.outputRate, ...
+        stimulus(tmpTriggerInd).delay,trialType(iType).triggerDuration,stimulus(tmpTriggerInd).amplitude);
     run.VTrialType{iType}=tmpV;
 end
 clearvars tmp*
@@ -422,24 +426,21 @@ end
 % daqreset; clearvars handler*
 
 %% Local functions (waveform helper + block design GUI + presets)
-function v = generateRectPulseTrain(nSamples, outputRate, delay, pulseWidth, frequency, duration, amplitude)
-% Builds a single output channel's rect pulse-train waveform (nSamples x
-% 1, in V or logical level). Used to regenerate the trialTrigger channel
-% per trial type with a duration that differs from stimulus.duration
-% (see "Build per-trial-type waveforms").
+function v = generateSinglePulse(nSamples, outputRate, delay, duration, amplitude)
+% Builds a single output channel's waveform (nSamples x 1) consisting of
+% one continuous pulse, HIGH for 'duration' seconds starting at 'delay'.
+% Used to regenerate the trialTrigger channel per trial type, where the
+% pulse WIDTH itself (trialType(iType).triggerDuration) is what encodes
+% trial type - a multi-pulse train (as used for 'rect' stimuli like
+% airpuff) breaks down here because 'duration' can be under 1 second
+% while the pulse-train math assumes at least one full period fits.
 v=zeros(nSamples,1);
-tmpStimStart=delay*outputRate;
-tmpPulseWidth=int32(pulseWidth*outputRate);
-tmpNPulses=frequency*duration;
-tmpPulseInterval=floor(outputRate/frequency);
-for iPulse=1:tmpNPulses
-    tmpPulseStartInd=tmpStimStart+(iPulse-1)*tmpPulseInterval+1;
-    tmpPulseEndInd=tmpStimStart+(iPulse-1)*tmpPulseInterval+tmpPulseWidth;
-    v(tmpPulseStartInd:tmpPulseEndInd)=amplitude;
-end
-if tmpPulseEndInd>nSamples
+tmpStartInd=round(delay*outputRate)+1;
+tmpEndInd=tmpStartInd+round(duration*outputRate)-1;
+if tmpEndInd>nSamples
     error('Stimulus is longer than trial ISI.')
 end
+v(tmpStartInd:tmpEndInd)=amplitude;
 end
 
 function [N, labels] = designStimBlockGUI(trialType, defaultN)
