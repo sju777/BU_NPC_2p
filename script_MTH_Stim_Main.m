@@ -14,9 +14,9 @@ clearvars; clc; daqreset;
 
 %% Folder
 % Filename will be generated as 'root\date\animal\trigger\Run00X_info.mat'
-folder.root='C:\Data\test';
-folder.date='26-07-226';     % (use YY-MM-DD)
-folder.animal='test';
+folder.root='C:\Data\test1';
+folder.date='26-08-03';     % (use YY-MM-DD)
+folder.animal='test1';
 folder.run= 1; % (needs to be a number)
 folder.info='test'; 
 
@@ -34,11 +34,11 @@ folder.info='test';
 % |
 %\|/
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-trial.N = 12 ; %EPI n=20 or 30 for stim runs; n=10@5 or 20Hz for RS
+trial.N = 5 ; %EPI n=20 or 30 for stim runs; n=10@5 or 20Hz for RS
     %ephys: 30, 10
-trial.ISI=15;% (in s) %20 long 5Hz,30sec
+trial.ISI=5;% (in s) %20 long 5Hz,30sec
     %ephys: 10
-trial.backgroundTime=30;%20 long 5Hz,30sec
+trial.backgroundTime=5;%20 long 5Hz,30sec
     %ephys: 120, 600
 trial.postTrialRecordTime=0;% (in s) Extra recording 
 %time after last trial %20 long 5Hz,30sec
@@ -58,21 +58,39 @@ run.tTotal=trial.backgroundTime+trial.N*trial.ISI+trial.postTrialRecordTime;
 %           delay           |       |       |       |       |       |
 % ---------------------------       ---------       ---------       -------
 %
-stimulus(1).name='trialTrigger';
-stimulus(1).type='rect';                % options: rect
-stimulus(1).delay=0;                    % delay (in s) from trial start to first pulse
-stimulus(1).pulseWidth=10e-3;            % width (in s) of individual pulses
-stimulus(1).frequency=1;                % frequency (in Hz) of pulse trail---
-stimulus(1).duration=1;                 % duration of pulse train
-stimulus(1).amplitude=5;                % amplitude (in V) of individual pulses
+% stimulus(1).name='trialTrigger';
+% stimulus(1).type='rect';                % options: rect
+% stimulus(1).delay=0;                    % delay (in s) from trial start to first pulse
+% stimulus(1).pulseWidth=10e-3;            % width (in s) of individual pulses
+% stimulus(1).frequency=1;                % frequency (in Hz) of pulse trail---
+% stimulus(1).duration=1;                 % duration of pulse train
+% stimulus(1).amplitude=5;                % amplitude (in V) of individual pulses
 
 stimulus(2).name='airpuff';
 stimulus(2).type='rect';
 stimulus(2).delay=0;
-stimulus(2).pulseWidth=1e-3;           % (in s)
+stimulus(2).pulseWidth=10e-3;           % (in s)
 stimulus(2).frequency=3;                % (in Hz)
 stimulus(2).duration=2;                 % (in s)
 stimulus(2).amplitude=5;                % (in V)
+
+
+% stimulus(1).name='audio';
+% stimulus(1).type='tone';
+% stimulus(1).delay=0;
+% %stimulus(1).pulseWidth=10e-3;           % (in s)
+% stimulus(1).frequency=12000;                % (in Hz)
+% stimulus(1).duration=2;                 % (in s)
+% stimulus(1).amplitude=5;                % (in V)
+
+stimulus(1).name='audio';
+stimulus(1).type='tone';                % options: rect, tone
+stimulus(1).delay=0;                    % delay (in s) from trial start to tone onset
+stimulus(1).toneFrequency=5000;        % carrier frequency (in Hz) of the tone
+stimulus(1).duration=1;               % duration (in s) of the tone
+stimulus(1).amplitude=5;                % amplitude (in V) of the tone
+stimulus(1).rampTime=0;              % (in s) linear on/off ramp to avoid clicks
+
 
 %% DAQ device 
 device.manufacturer='ni';
@@ -83,9 +101,9 @@ device.name='Dev1';
 %   must match the channel name in the device (ai0, ai1, ai2, ...)!
 % The variable 'device.inputChannel.name' must be unique!
 device.inputRate=30E3;  %(in Hz)
-device.inputChannel(1).id='ai16';
+device.inputChannel(1).id='ai1';
 device.inputChannel(1).name='trialTrigger';
-device.inputChannel(2).id='ai20';
+device.inputChannel(2).id='ai2';
 device.inputChannel(2).name='everyFrame';
 
 %% Analog Output channels
@@ -93,9 +111,11 @@ device.inputChannel(2).name='everyFrame';
 % The variable 'device.outputChannel.name' must be unique!
 % The variable 'device.outputChannel.name' must match 'stimulus.name'!
 device.outputRate=30E3; %(in Hz)
-device.outputChannel(1).id='ao2';
-device.outputChannel(1).name='trialTrigger';
-device.outputChannel(2).id='ao3';
+% device.outputChannel(1).id='ao0';
+% device.outputChannel(1).name='trialTrigger';
+device.outputChannel(1).id='ao0';
+device.outputChannel(1).name='audio';
+device.outputChannel(2).id='ao1';
 device.outputChannel(2).name='airpuff';
 
 
@@ -136,6 +156,27 @@ for iStimulus=1:size(stimulus,2)
                 if tmpPulseEndInd>size(run.tTrial,2)
                     error('Stimulus is longer than trial ISI.')
                 end
+            case 'tone'
+                % Audio stimulation: sine-wave tone burst with linear
+                % on/off ramp envelope (to avoid audio clicks)
+                tmpStimStart=stimulus(iStimulus).delay*device.outputRate+1;
+                tmpNSamples=round(stimulus(iStimulus).duration*device.outputRate);
+                tmpT=(0:tmpNSamples-1)/device.outputRate;
+
+                tmpTone=stimulus(iStimulus).amplitude*sin(2*pi*stimulus(iStimulus).toneFrequency*tmpT)';
+
+                tmpRampSamples=round(stimulus(iStimulus).rampTime*device.outputRate);
+
+                if tmpRampSamples>0
+                    tmpRamp=linspace(0,1,tmpRampSamples)';
+                    tmpTone(1:tmpRampSamples)=tmpTone(1:tmpRampSamples).*tmpRamp;
+                    tmpTone(end-tmpRampSamples+1:end)=tmpTone(end-tmpRampSamples+1:end).*flipud(tmpRamp);
+                end
+                tmpStimEnd=tmpStimStart+tmpNSamples-1;
+                run.VTrial(tmpStimStart:tmpStimEnd,tmpInd)=tmpTone;
+                if tmpStimEnd>size(run.tTrial,2)
+                    error('Stimulus is longer than trial ISI.')
+                end
             otherwise
                 error('Unknown stimulus type.')
         end
@@ -164,7 +205,7 @@ end
 fprintf('\n\nPreparing DAQ system...')
 daqreset; clearvars handler*
 tmpInfo=daqlist(device.manufacturer);
-%tmpInfo=tmpInfo(3,:)
+tmpInfo=tmpInfo(1,:)
 tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'AnalogInput'));
 device.info.analogInput.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
 tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'AnalogOutput'));
