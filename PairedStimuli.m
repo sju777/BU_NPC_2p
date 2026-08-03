@@ -62,11 +62,14 @@
 % A "Presets" panel (Window 1, under Save Output) lets you save the
 % current Task Setup / Runtime / DAQ Channels configuration (audio/
 % airpuff/paired settings, tone list, airpuff/stim durations, ITI
-% settings, block size, and the full DAQ channel map) to a named .mat
-% file under PairedStimuli_Presets/ next to this script, and reload it
-% later via a dropdown + Load button. Save Output (path/filename) and the
-% generated trial sequence itself are NOT part of a preset -- those are
-% per-session/regenerated fresh each time.
+% settings, block size, and the full DAQ channel map) TOGETHER WITH
+% Window 2's generated Trial Block (session.exp.trials, including any
+% hand-edits made in the block table) to a named .mat file under
+% PairedStimuli_Presets/ next to this script, and reload both windows'
+% state at once later via a dropdown + Load button. Save Output
+% (path/filename) is the only thing NOT part of a preset -- that's
+% per-session. If a preset was saved before a block was ever generated,
+% loading it just leaves Window 2 empty as before.
 %
 % Unlike SalientStimuli.m (built with GUIDE, backed by a .fig file), this
 % GUI is built programmatically (no .fig) so it has no external binary
@@ -111,7 +114,6 @@ session.exp.daqChannelMap = buildDefaultChannelMap();
 populateDaqChannelTable(handles);
 
 refreshPresetList(handles);
-updateAirpuffTotalTime(handles);
 
 updateAudioControlsEnable(handles);
 updateAirpuffControlsEnable(handles);
@@ -142,11 +144,15 @@ function filename_prefix_Callback(hObject, eventdata, handles)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%% PRESETS %%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Save/load the Task Setup + Runtime + DAQ Channels configuration to/from
-% a named .mat file, so you don't have to re-enter the same protocol by
-% hand every session. Save Output (path/filename) and the trial sequence
-% itself are deliberately NOT included -- generate a fresh block after
-% loading a preset.
+% Save/load the Task Setup + Runtime + DAQ Channels configuration (Window
+% 1) TOGETHER WITH the generated Trial Block (Window 2, session.exp.
+% trials -- including any hand-edits made in the block table) to/from a
+% single named .mat file, so one preset captures both windows and you
+% don't have to re-enter the same protocol or regenerate/re-edit the same
+% block by hand every session. Save Output (path/filename) is the only
+% thing deliberately NOT included -- that's per-session. If a preset was
+% saved before any block was generated, loading it leaves the block empty
+% (same as before) and you just click "Generate Block" (Window 2).
 
 % folder presets are stored in, next to this script (created on first save)
 function d = presetDir()
@@ -183,14 +189,19 @@ preset.tone_n = get(handles.tone_n,'String');
 preset.audio_dur = get(handles.audio_dur,'String');
 preset.tone = session.exp.tone; % full per-tone freq/vol config, not just the one shown
 preset.airpuff_pulse_len = get(handles.airpuff_pulse_len,'String');
-preset.airpuff_ipi = get(handles.airpuff_ipi,'String');
 preset.airpuff_n_pulses = get(handles.airpuff_n_pulses,'String');
+preset.airpuff_total_time = get(handles.airpuff_total_time,'String');
 preset.stim_dur = get(handles.stim_dur,'String');
 preset.iti_min = get(handles.iti_min,'String');
 preset.iti_max = get(handles.iti_max,'String');
 preset.iti_initial = get(handles.iti_initial,'String');
 preset.n_trials = get(handles.n_trials,'String');
 preset.daqChannelMap = session.exp.daqChannelMap;
+if isfield(session.exp,'trials') && istable(session.exp.trials)
+    preset.trials = session.exp.trials; % Window 2's generated block (incl. any hand-edits), saved as-is
+else
+    preset.trials = table(); % no block generated yet -- save an empty placeholder
+end
 
 d = presetDir();
 if ~exist(d,'dir')
@@ -239,16 +250,25 @@ set(handles.tone_freq,'String',num2str(session.exp.tone.(toneFields{1}).freq));
 set(handles.tone_vol,'String',strjoin(cellstr(num2str(session.exp.tone.(toneFields{1}).vol'))',','));
 if isfield(preset,'airpuff_pulse_len')
     set(handles.airpuff_pulse_len,'String',preset.airpuff_pulse_len);
-    set(handles.airpuff_ipi,'String',preset.airpuff_ipi);
     set(handles.airpuff_n_pulses,'String',preset.airpuff_n_pulses);
+    if isfield(preset,'airpuff_total_time')
+        set(handles.airpuff_total_time,'String',preset.airpuff_total_time);
+    else
+        % older preset format saved pulse length/IPI/# of pulses instead
+        % of pulse length/# of pulses/total time -- convert
+        pulseLen = str2double(preset.airpuff_pulse_len);
+        nPulses = round(str2double(preset.airpuff_n_pulses));
+        ipi = str2double(preset.airpuff_ipi);
+        totalTime = nPulses*pulseLen + max(0,nPulses-1)*ipi;
+        set(handles.airpuff_total_time,'String',num2str(totalTime));
+    end
 elseif isfield(preset,'airpuff_dur')
-    % older preset format (single airpuff pulse, no train) -- convert to
-    % an equivalent 1-pulse train
+    % oldest preset format (single airpuff pulse, no train at all) --
+    % convert to an equivalent 1-pulse train
     set(handles.airpuff_pulse_len,'String',preset.airpuff_dur);
-    set(handles.airpuff_ipi,'String','0');
     set(handles.airpuff_n_pulses,'String','1');
+    set(handles.airpuff_total_time,'String',preset.airpuff_dur);
 end
-updateAirpuffTotalTime(handles);
 set(handles.stim_dur,'String',preset.stim_dur);
 set(handles.iti_min,'String',preset.iti_min);
 set(handles.iti_max,'String',preset.iti_max);
@@ -260,7 +280,25 @@ populateDaqChannelTable(handles);
 updateAudioControlsEnable(handles);
 updateAirpuffControlsEnable(handles);
 
-msgbox(sprintf('Loaded preset "%s". Click "Generate Block" (Window 2) to build a trial sequence with these settings.',name),'Preset loaded');
+% restore the Window 2 trial block, if this preset was saved with one
+if isfield(preset,'trials') && istable(preset.trials) && height(preset.trials)>0
+    session.exp.trials = preset.trials;
+    session.exp.n_trials = height(preset.trials);
+    set(handles.n_trials,'String',num2str(session.exp.n_trials));
+    populateBlockTable(handles);
+    updateBlockPreview(handles);
+    set(handles.run_setup_ok,'Enable','on');
+    blockMsg = 'Its saved trial block (Window 2) was restored and is ready to run.';
+else
+    if isfield(session.exp,'trials')
+        session.exp = rmfield(session.exp,'trials'); % this preset didn't come with a block -- don't leave a stale one showing
+    end
+    updateBlockPreview(handles); % shows the "generate a block first" placeholder
+    set(handles.run_setup_ok,'Enable','off');
+    blockMsg = 'This preset was saved without a trial block -- click "Generate Block" (Window 2) to build one.';
+end
+
+msgbox(sprintf('Loaded preset "%s". %s',name,blockMsg),'Preset loaded');
 
 % --- Executes on button press in delete_preset.
 function delete_preset_Callback(hObject, eventdata, handles)
@@ -280,36 +318,39 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% DAQ CHANNELS %%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Full channel inventory for our NI PCI/PCIe/PXI/PXIe/USB-6259, per its
-% specifications: 32 single-ended analog inputs (AI0-AI31), 4 analog
-% outputs (AO0-AO3), 48 digital I/O lines across 3 ports (P0.<0..31>,
-% P1.<0..7>/PFI<0..7>, P2.<0..7>/PFI<8..15>), and 2 general-purpose
-% counter/timers (ctr0-ctr1). Every AI/AO/digital row can be assigned a
-% role (Reward, Lick, Audio, Airpuff, TTL Sync, TTL In, or Unused); the
-% 48 digital lines can also have their Direction (Input/Output) changed.
-% Assigning an exclusive role (Reward/Lick/Audio/Airpuff/TTL Sync) to a
-% channel automatically vacates whichever other channel used to hold
-% that role in the same direction, so there's always exactly one holder.
-% Ball (AI0-AI7) and Photometry (ctr0-ctr3) rows are locked -- they're
-% multi-channel systems owned by BallInitialize.m / LEDInitialize.m.
+% Full channel inventory for our NI PCIe-6321, per its specifications
+% (NI doc 374461C-01): 16 single-ended analog inputs (AI0-AI15, or 8
+% differential pairs), 2 analog outputs (AO0-AO1, +-10V only), 24 digital
+% I/O lines across 3 ports (P0.<0..7>, P1.<0..7>/PFI<0..7>,
+% P2.<0..7>/PFI<8..15>), and 4 general-purpose counter/timers (ctr0-
+% ctr3, all real on this device). Every AI/AO/digital row can be
+% assigned a role (Reward, Lick, Audio, Airpuff, TTL Sync, TTL In, or
+% Unused); the 24 digital lines can also have their Direction
+% (Input/Output) changed. Assigning an exclusive role (Reward/Lick/
+% Audio/Airpuff/TTL Sync) to a channel automatically vacates whichever
+% other channel used to hold that role in the same direction, so there's
+% always exactly one holder. Ball (AI0-AI7) and Photometry (ctr0-ctr3)
+% rows are locked -- they're multi-channel systems owned by
+% BallInitialize.m / LEDInitialize.m.
 %
-% NOTE: the 6259 has only 2 counter/timers (ctr0-ctr1). LEDInitialize.m's
-% 3rd photometry LED + green-camera trigger needs ctr2/ctr3, which don't
-% exist on this device -- those two rows are flagged, not usable.
+% NOTE: unlike a device with a 32-line Port 0, this device's Port 0 only
+% has 8 lines (P0.<0..7>), so the default wiring below is spread across
+% all three 8-line ports (P0/P1/P2) rather than crammed onto P0 alone.
+% Port 0 vs Port 1/2 makes no functional difference here -- nothing in
+% this task uses Port 0's hardware-timed bulk-waveform capability, only
+% simple static digital I/O, which P1/P2 (PFI) support equally well.
 
-% builds the full channel inventory above, with the currently-wired
-% channels (reward, lick, the 2 stimulus channels, TTL sync, spare TTL
-% ins, ball, photometry) defaulted to match what was hardcoded in
-% SalientStimuli_Initialize.m / TTLSyncInitialize.m / BallInitialize.m /
-% LEDInitialize.m; everything else defaults to Unused and is free to
-% assign.
+% builds the full channel inventory above, with reward/lick/airpuff/
+% audio/TTL-sync/spare-TTL-in/ball/photometry defaulted to a layout that
+% fits this device's actual pin budget; everything else defaults to
+% Unused and is free to assign.
 function map = buildDefaultChannelMap()
 map = struct('key',{},'label',{},'port',{},'type',{},'direction',{},'assignment',{},'amplitude',{},'editable',{});
 
-% ---- Analog Input: AI0-AI31 (32 single-ended channels) ----
+% ---- Analog Input: AI0-AI15 (16 single-ended channels) ----
 % AI0-AI7 are the ball treadmill's 2 optical mice (magnitude+sign per
 % axis) -- fixed/owned by BallInitialize.m
-for n = 0:31
+for n = 0:15
     if n <= 7
         map(end+1) = channelRow(sprintf('ai%d',n),sprintf('AI %d',n),sprintf('ai%d',n),'analog','in','Ball',NaN,false); %#ok<AGROW>
     else
@@ -317,21 +358,22 @@ for n = 0:31
     end
 end
 
-% ---- Analog Output: AO0-AO3 (4 channels) ----
+% ---- Analog Output: AO0-AO1 (2 channels, +-10V only) ----
 % none used by default; assign one to Audio/Airpuff if you want an
 % analog-triggered stimulus (Amplitude sets the "on" voltage)
-for n = 0:3
+for n = 0:1
     map(end+1) = channelRow(sprintf('ao%d',n),sprintf('AO %d',n),sprintf('ao%d',n),'analog','out','Unused',5,true); %#ok<AGROW>
 end
 
-% ---- Digital I/O Port 0: P0.0-P0.31 (32 lines) ----
-for n = 0:31
+% ---- Digital I/O Port 0: P0.0-P0.7 (8 lines) ----
+% reward + lick + airpuff live here
+for n = 0:7
     map(end+1) = channelRow(sprintf('p0_%d',n),sprintf('P0.%d',n),sprintf('Port0/Line%d',n),'digital','in','Unused',NaN,true); %#ok<AGROW>
 end
-p0StartIdx = numel(map) - 32; % index (0-based offset) of P0.0 within map
-p0Line      = [0        1        2        3      4        5         6        7          9        10       13       14      ];
-p0Direction = {'in',    'in',    'in',    'in',  'in',    'out',    'in',    'in',      'in',    'in',    'in',    'out'   };
-p0Assign    = {'Airpuff','Reward','TTL In','Lick','TTL In','Airpuff','TTL In','TTL Sync','TTL In','Audio', 'TTL In','Audio' };
+p0StartIdx = numel(map) - 8; % index (0-based offset) of P0.0 within map
+p0Line      = [0,       1,       2,      3,       4       ];
+p0Direction = {'out',   'in',    'in',   'out',   'in'    };
+p0Assign    = {'Reward','Reward','Lick', 'Airpuff','Airpuff'};
 for i = 1:numel(p0Line)
     idx = p0StartIdx + p0Line(i) + 1;
     map(idx).direction = p0Direction{i};
@@ -339,24 +381,30 @@ for i = 1:numel(p0Line)
 end
 
 % ---- Digital I/O Port 1: P1.0-P1.7 / PFI0-PFI7 (8 lines) ----
-% none used by default -- all free
-for n = 0:7
+% audio lives here
+map(end+1) = channelRow('p1_0','P1.0 (PFI 0)','Port1/Line0','digital','out','Audio',NaN,true); %#ok<AGROW>
+map(end+1) = channelRow('p1_1','P1.1 (PFI 1)','Port1/Line1','digital','in','Audio',NaN,true); %#ok<AGROW>
+for n = 2:7
     map(end+1) = channelRow(sprintf('p1_%d',n),sprintf('P1.%d (PFI %d)',n,n),sprintf('Port1/Line%d',n),'digital','in','Unused',NaN,true); %#ok<AGROW>
 end
 
 % ---- Digital I/O Port 2: P2.0-P2.7 / PFI8-PFI15 (8 lines) ----
+% TTL sync + spare TTL ins live here
 map(end+1) = channelRow('p2_0','P2.0 (PFI 8)','Port2/Line0','digital','out','TTL Sync',NaN,true); %#ok<AGROW>
-for n = 1:7
-    map(end+1) = channelRow(sprintf('p2_%d',n),sprintf('P2.%d (PFI %d)',n,n+8),sprintf('Port2/Line%d',n),'digital','in','Unused',NaN,true); %#ok<AGROW>
+map(end+1) = channelRow('p2_1','P2.1 (PFI 9)','Port2/Line1','digital','in','TTL Sync',NaN,true); %#ok<AGROW>
+for n = 2:6 % 5 spare TTL In lines
+    map(end+1) = channelRow(sprintf('p2_%d',n),sprintf('P2.%d (PFI %d)',n,n+8),sprintf('Port2/Line%d',n),'digital','in','TTL In',NaN,true); %#ok<AGROW>
 end
+map(end+1) = channelRow('p2_7','P2.7 (PFI 15)','Port2/Line7','digital','in','Unused',NaN,true); %#ok<AGROW>
 
-% ---- General-purpose counter/timers: device has ctr0-ctr1 only ----
+% ---- General-purpose counter/timers: ctr0-ctr3 (all 4 real on this device) ----
 % used by LEDInitialize.m for photometry excitation LEDs -- fixed/owned
-% by that script, not reassignable here
+% by that script (not exposed in this GUI's Task Setup, but still listed
+% here and left reserved), not reassignable from this table
 map(end+1) = channelRow('ctr0','Ctr 0','ctr0','counter','out','Photometry',NaN,false);
 map(end+1) = channelRow('ctr1','Ctr 1','ctr1','counter','out','Photometry',NaN,false);
-map(end+1) = channelRow('ctr2','Ctr 2 (NOT AVAILABLE -- 6259 has only 2 counters)','ctr2','counter','out','Photometry',NaN,false);
-map(end+1) = channelRow('ctr3','Ctr 3 (NOT AVAILABLE -- 6259 has only 2 counters)','ctr3','counter','out','Photometry',NaN,false);
+map(end+1) = channelRow('ctr2','Ctr 2','ctr2','counter','out','Photometry',NaN,false);
+map(end+1) = channelRow('ctr3','Ctr 3','ctr3','counter','out','Photometry',NaN,false);
 
 function row = channelRow(key,label,port,type,direction,assignment,amplitude,editable)
 row.key = key; row.label = label; row.port = port; row.type = type;
@@ -541,14 +589,6 @@ function airpuff_pulse_len_Callback(hObject, eventdata, handles)
 if str2double(get(hObject,'String')) <= 0
     set(hObject,'String','0.05')
 end
-updateAirpuffTotalTime(handles);
-
-function airpuff_ipi_Callback(hObject, eventdata, handles)
-% Hints: get(hObject,'String') returns contents of airpuff_ipi as text
-if str2double(get(hObject,'String')) < 0
-    set(hObject,'String','0')
-end
-updateAirpuffTotalTime(handles);
 
 function airpuff_n_pulses_Callback(hObject, eventdata, handles)
 % Hints: get(hObject,'String') returns contents of airpuff_n_pulses as text
@@ -557,17 +597,12 @@ if isnan(val) || val<1
     val = 1;
 end
 set(hObject,'String',num2str(val));
-updateAirpuffTotalTime(handles);
 
-% helper: recompute the read-only "Total time" readout from pulse
-% length, inter-pulse interval (IPI), and # of pulses:
-%   total = n_pulses*pulse_len + (n_pulses-1)*ipi
-function updateAirpuffTotalTime(handles)
-pulseLen = str2double(get(handles.airpuff_pulse_len,'String'));
-ipi = str2double(get(handles.airpuff_ipi,'String'));
-nPulses = round(str2double(get(handles.airpuff_n_pulses,'String')));
-totalTime = nPulses*pulseLen + max(0,nPulses-1)*ipi;
-set(handles.airpuff_total_time,'String',num2str(totalTime));
+function airpuff_total_time_Callback(hObject, eventdata, handles)
+% Hints: get(hObject,'String') returns contents of airpuff_total_time as text
+if str2double(get(hObject,'String')) <= 0
+    set(hObject,'String','0.05')
+end
 
 % --- Executes on button press in paired_yes.
 function paired_yes_Callback(hObject, eventdata, handles)
@@ -604,8 +639,8 @@ else
     onoff = 'off';
 end
 set(handles.airpuff_pulse_len,'Enable',onoff)
-set(handles.airpuff_ipi,'Enable',onoff)
 set(handles.airpuff_n_pulses,'Enable',onoff)
+set(handles.airpuff_total_time,'Enable',onoff)
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -902,14 +937,30 @@ end
 % within the trial/stim window, BEFORE disabling anything below, so a
 % failed check here doesn't leave the GUI half-locked
 stimDur = str2double(get(handles.stim_dur,'String'));
+
+% Airpuff is controlled by 3 user inputs -- pulse length, # of pulses,
+% and total time -- rather than an explicit inter-pulse interval (IPI).
+% IPI is derived so exactly N pulses of the given length fit evenly
+% within the given total time: IPI = (total - N*len) / (N-1).
 airpuffPulseLen = str2double(get(handles.airpuff_pulse_len,'String'));
-airpuffIPI = str2double(get(handles.airpuff_ipi,'String'));
 airpuffNPulses = round(str2double(get(handles.airpuff_n_pulses,'String')));
-airpuffTotal = airpuffNPulses*airpuffPulseLen + max(0,airpuffNPulses-1)*airpuffIPI;
+airpuffTotal = str2double(get(handles.airpuff_total_time,'String'));
+minTotal = airpuffNPulses*airpuffPulseLen; % shortest total time that fits N pulses back-to-back with no gap
+if airpuffTotal < minTotal
+    errordlg(sprintf(['Total time (%.3gs) is too short to fit %d pulses of %.3gs each -- ' ...
+        'that needs at least %.3gs even with zero gap between pulses. Increase Total time, ' ...
+        'or reduce the pulse length/count.'], ...
+        airpuffTotal, airpuffNPulses, airpuffPulseLen, minTotal), 'Cannot start setup')
+    return
+end
+if airpuffNPulses > 1
+    airpuffIPI = (airpuffTotal - minTotal) / (airpuffNPulses-1);
+else
+    airpuffIPI = 0; % a single pulse has no gap to compute
+end
 if airpuffTotal > stimDur
-    errordlg(sprintf(['Airpuff pulse train totals %.3gs (%d pulses x %.3gs + %.3gs IPI), which exceeds ' ...
-        'the trial/stim duration (%.3gs). Reduce the pulse length/IPI/count, or increase the trial/stim duration.'], ...
-        airpuffTotal, airpuffNPulses, airpuffPulseLen, airpuffIPI, stimDur), 'Cannot start setup')
+    errordlg(sprintf('Airpuff total time (%.3gs) exceeds the trial/stim duration (%.3gs). Reduce the total time, or increase the trial/stim duration.', ...
+        airpuffTotal, stimDur), 'Cannot start setup')
     return
 end
 audioDur = str2double(get(handles.audio_dur,'String'));
@@ -935,8 +986,8 @@ set(handles.tone_freq,'Enable','off')
 set(handles.tone_vol,'Enable','off')
 set(handles.airpuff_yes,'Enable','off')
 set(handles.airpuff_pulse_len,'Enable','off')
-set(handles.airpuff_ipi,'Enable','off')
 set(handles.airpuff_n_pulses,'Enable','off')
+set(handles.airpuff_total_time,'Enable','off')
 set(handles.paired_yes,'Enable','off')
 set(handles.stim_dur,'Enable','off')
 set(handles.iti_min,'Enable','off')
@@ -969,14 +1020,14 @@ session.dataFilename = fullfile(get(handles.save_path,'String'),filename);
 session.temp.refreshDisplay=3;
 session.exp.delayCond = 0;
 session.exp.salient_stim = 1; % reuse the SalientStimuli real-time plotting hook
-% (stimDur/airpuffPulseLen/airpuffIPI/airpuffNPulses/airpuffTotal/
-% audioDur were already read + validated above, before anything got
-% disabled)
+% (stimDur/airpuffPulseLen/airpuffNPulses/airpuffTotal/audioDur were
+% already read from the GUI, and airpuffIPI already derived from them,
+% before anything got disabled above)
 session.exp.stim_dur = stimDur;
 session.exp.airpuff_pulse_len = airpuffPulseLen;
-session.exp.airpuff_ipi = airpuffIPI;
+session.exp.airpuff_ipi = airpuffIPI; % derived from pulse length/# of pulses/total time
 session.exp.airpuff_n_pulses = airpuffNPulses;
-session.exp.airpuff_dur = airpuffTotal; % total pulse-train time
+session.exp.airpuff_dur = airpuffTotal; % total pulse-train time (as entered)
 session.exp.audio_dur = audioDur;
 
 %%%%% initialize other things
@@ -1116,7 +1167,7 @@ handles.delete_preset = uicontrol('Parent',pPreset,'Style','pushbutton','String'
 set(handles.delete_preset,'Callback',@(h,e) delete_preset_Callback(h,e,guidata(h)));
 
 %%%%% DAQ Channels panel (view + reconfigure every DAQ channel)
-pDaq = uipanel('Parent',fig,'Title','DAQ Channels (NI 6259: 32 AI, 4 AO, 48 DIO, 2 counters)','Units','normalized','Position',[0.02 0.400 0.96 0.415]);
+pDaq = uipanel('Parent',fig,'Title','DAQ Channels (NI PCIe-6321: 16 AI, 2 AO, 24 DIO, 4 counters)','Units','normalized','Position',[0.02 0.400 0.96 0.415]);
 uicontrol('Parent',pDaq,'Style','text','Units','normalized','Position',[0.01 0.94 0.98 0.05],'HorizontalAlignment','left', ...
     'String','Every AI/AO/digital channel on this device (per its specifications). Edit Direction (digital only) and Assignment for any channel -- assigning an exclusive role (Reward/Lick/Audio/Airpuff/TTL Sync) auto-vacates its previous holder. Ball (AI0-7) and Photometry (Ctr0-3) rows are fixed system channels.');
 handles.daq_channel_table = uitable('Parent',pDaq,'Units','normalized','Position',[0.01 0.02 0.98 0.91], ...
@@ -1155,20 +1206,15 @@ set(handles.tone_vol,'Callback',@(h,e) tone_vol_Callback(h,e,guidata(h)));
 pAirpuff = uipanel('Parent',pTask,'Title','Airpuff (whisker)','Units','normalized','Position',[0.35 0.05 0.31 0.90]);
 handles.airpuff_yes = uicontrol('Parent',pAirpuff,'Style','checkbox','String','Include airpuff trials','Value',1,'Units','normalized','Position',[0.05 0.85 0.9 0.12]);
 set(handles.airpuff_yes,'Callback',@(h,e) airpuff_yes_Callback(h,e,guidata(h)));
-uicontrol('Parent',pAirpuff,'Style','text','String','Pulse length (s):','Units','normalized','Position',[0.05 0.72 0.55 0.10],'HorizontalAlignment','left');
-handles.airpuff_pulse_len = uicontrol('Parent',pAirpuff,'Style','edit','String','0.05','Units','normalized','Position',[0.62 0.72 0.30 0.10],'BackgroundColor','white');
+uicontrol('Parent',pAirpuff,'Style','text','String','Pulse length (s):','Units','normalized','Position',[0.05 0.60 0.55 0.10],'HorizontalAlignment','left');
+handles.airpuff_pulse_len = uicontrol('Parent',pAirpuff,'Style','edit','String','0.05','Units','normalized','Position',[0.62 0.60 0.30 0.10],'BackgroundColor','white');
 set(handles.airpuff_pulse_len,'Callback',@(h,e) airpuff_pulse_len_Callback(h,e,guidata(h)));
-uicontrol('Parent',pAirpuff,'Style','text','String','Inter-pulse interval (s):','Units','normalized','Position',[0.05 0.58 0.55 0.10],'HorizontalAlignment','left');
-handles.airpuff_ipi = uicontrol('Parent',pAirpuff,'Style','edit','String','0.1','Units','normalized','Position',[0.62 0.58 0.30 0.10],'BackgroundColor','white');
-set(handles.airpuff_ipi,'Callback',@(h,e) airpuff_ipi_Callback(h,e,guidata(h)));
 uicontrol('Parent',pAirpuff,'Style','text','String','# of pulses:','Units','normalized','Position',[0.05 0.44 0.55 0.10],'HorizontalAlignment','left');
 handles.airpuff_n_pulses = uicontrol('Parent',pAirpuff,'Style','edit','String','1','Units','normalized','Position',[0.62 0.44 0.30 0.10],'BackgroundColor','white');
 set(handles.airpuff_n_pulses,'Callback',@(h,e) airpuff_n_pulses_Callback(h,e,guidata(h)));
-uicontrol('Parent',pAirpuff,'Style','text','String','Total time (s):','Units','normalized','Position',[0.05 0.30 0.55 0.10],'HorizontalAlignment','left');
-handles.airpuff_total_time = uicontrol('Parent',pAirpuff,'Style','edit','String','0.05','Units','normalized','Position',[0.62 0.30 0.30 0.10], ...
-    'Enable','inactive','BackgroundColor',[0.9 0.9 0.9]); % read-only: total = n_pulses*pulse_len + (n_pulses-1)*IPI
-uicontrol('Parent',pAirpuff,'Style','text','String',{'Set puff pressure (PSI) manually on the picospritzer/valve driver.'}, ...
-    'Units','normalized','Position',[0.05 0.02 0.90 0.24],'HorizontalAlignment','left');
+uicontrol('Parent',pAirpuff,'Style','text','String','Total time (s):','Units','normalized','Position',[0.05 0.28 0.55 0.10],'HorizontalAlignment','left');
+handles.airpuff_total_time = uicontrol('Parent',pAirpuff,'Style','edit','String','0.05','Units','normalized','Position',[0.62 0.28 0.30 0.10],'BackgroundColor','white');
+set(handles.airpuff_total_time,'Callback',@(h,e) airpuff_total_time_Callback(h,e,guidata(h)));
 
 % --- Paired sub-panel
 pPaired = uipanel('Parent',pTask,'Title','Paired (audio + airpuff)','Units','normalized','Position',[0.68 0.05 0.30 0.90]);

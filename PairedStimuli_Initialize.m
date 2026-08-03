@@ -5,8 +5,8 @@
 % digital/analog type and DAQ port string), every channel actually used
 % here (reward, lick, the two stimulus channels, TTL sync, spare TTL ins)
 % is created dynamically from session.exp.daqChannelMap -- the full NI
-% 6259 channel inventory (32 AI, 4 AO, 48 digital I/O, 2 counters) you
-% can browse/edit in the PairedStimuli GUI's "DAQ Channels" table:
+% PCIe-6321 channel inventory (16 AI, 2 AO, 24 digital I/O, 4 counters)
+% you can browse/edit in the PairedStimuli GUI's "DAQ Channels" table:
 % reassign any channel's role (Reward/Lick/Audio/Airpuff/TTL Sync/TTL
 % In/Unused), and for digital lines, its Direction. See PairedStimuli.m's
 % buildDefaultChannelMap/daq_channel_table_CellEditCallback for how that
@@ -17,10 +17,11 @@
 % part of this dynamic assignment -- they're special multi-channel
 % systems still created by BallInitialize.m / LEDInitialize.m exactly as
 % in SalientStimuli.m. They're only *listed* in the DAQ Channels table
-% for reference (and, per the NI 6259 specifications, that device only
-% has 2 counter/timers -- LEDInitialize.m's 3rd-LED/camera-trigger use of
-% ctr2/ctr3 will fail on this hardware; see the flagged rows in the
-% table).
+% for reference. Unlike the NI 6259 this task previously targeted, the
+% PCIe-6321 has all 4 counter/timers (ctr0-ctr3) needed by
+% LEDInitialize.m's 3rd-LED/camera-trigger, so those rows are no longer
+% flagged as unavailable (though the Photometry LEDs feature itself isn't
+% exposed in this GUI's Task Setup either way).
 %
 % One exception to the generic per-row creation above: if Audio's output
 % channel is analog, it's NOT added to the shared on-demand session

@@ -63,8 +63,9 @@ clearvars iRepeat
 run.tTotal=trial.backgroundTime+trial.N*trial.ISI+trial.postTrialRecordTime;
 
 %% Define stimulus parameters
-% Stimuli are defined per Analog Output Channel (ao0, ao1, ao2, ...)
-% The number of stimuli must match number of Analog Output Channels!
+% Stimuli are defined per Output Channel (see 'device.outputChannel'
+% below - one analog or digital channel per stimulus).
+% The number of stimuli must match number of Output Channels!
 % The variable 'stimulus.name' must match 'device.outputChannel.name'!
 
 % OPTION: rect
@@ -89,7 +90,8 @@ stimulus(1).delay=0;                    % delay (in s) from trial start to first
 stimulus(1).pulseWidth=10e-3;            % width (in s) of individual pulses
 stimulus(1).frequency=1;                % frequency (in Hz) of pulse trail---
 stimulus(1).duration=1;                 % duration of pulse train
-stimulus(1).amplitude=5;                % amplitude (in V) of individual pulses
+stimulus(1).amplitude=1;                % logical level (1=high) - this channel is
+                                         % a Digital output (port0/line0), not Voltage
 
 stimulus(2).name='airpuff';
 stimulus(2).type='rect';
@@ -103,9 +105,9 @@ stimulus(2).amplitude=5;                % (in V)
 stimulus(3).name='audioStim';
 stimulus(3).type='tone';                % options: rect, tone
 stimulus(3).delay=0;                    % delay (in s) from trial start to tone onset
-stimulus(3).toneFrequency=10000;        % carrier frequency (in Hz) of the tone
-stimulus(3).duration=0.5;               % duration (in s) of the tone
-stimulus(3).amplitude=1;                % amplitude (in V) of the tone
+stimulus(3).toneFrequency=12000;        % carrier frequency (in Hz) of the tone
+stimulus(3).duration=1;                 % duration (in s) of the tone
+stimulus(3).amplitude=0.005;            % amplitude (in V) of the tone (5 mV)
 stimulus(3).rampTime=5e-3;              % (in s) linear on/off ramp to avoid clicks
 
 %% DAQ device
@@ -116,23 +118,34 @@ device.name='Dev1';
 % The variable 'device.inputChannel.id' must be unique and
 %   must match the channel name in the device (ai0, ai1, ai2, ...)!
 % The variable 'device.inputChannel.name' must be unique!
+% NI PCIe-6321 has 16 single-ended AI channels (ai0-ai15) - ai16/ai20
+% used previously are not valid on this card.
 device.inputRate=30E3;  %(in Hz)
-device.inputChannel(1).id='ai16';
+device.inputChannel(1).id='ai0';
 device.inputChannel(1).name='trialTrigger';
-device.inputChannel(2).id='ai20';
+device.inputChannel(2).id='ai1';
 device.inputChannel(2).name='everyFrame';
 
-%% Analog Output channels
+%% Analog/Digital Output channels
 % The variable 'device.outputChannel.id' must be unique!
 % The variable 'device.outputChannel.name' must be unique!
 % The variable 'device.outputChannel.name' must match 'stimulus.name'!
+% The variable 'device.outputChannel.type' selects 'Voltage' (analog
+% output) or 'Digital' (Port 0 digital line) for that channel.
+% NI PCIe-6321 has only 2 analog output channels (ao0, ao1) - so
+% 'trialTrigger' (a simple TTL-style pulse) is routed to a Port 0
+% digital line instead, freeing both AO channels for the real stimuli
+% ('airpuff' and 'audioStim').
 device.outputRate=30E3; %(in Hz)
-device.outputChannel(1).id='ao2';
+device.outputChannel(1).id='port0/line0';
 device.outputChannel(1).name='trialTrigger';
-device.outputChannel(2).id='ao3';
+device.outputChannel(1).type='Digital';
+device.outputChannel(2).id='ao0';
 device.outputChannel(2).name='airpuff';
-device.outputChannel(3).id='ao4';
+device.outputChannel(2).type='Voltage';
+device.outputChannel(3).id='ao1';
 device.outputChannel(3).name='audioStim';
+device.outputChannel(3).type='Voltage';
 
 
 %%
@@ -252,6 +265,8 @@ tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'AnalogInput'))
 device.info.analogInput.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
 tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'AnalogOutput'));
 device.info.analogOutput.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
+tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'DigitalIO'));
+device.info.digitalIO.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
 
 %% Perform consistency checks
 if size({device.inputChannel.id},2)~=size(unique({device.inputChannel.id}),2)
@@ -275,9 +290,16 @@ for iChannel = 1:size(device.inputChannel,2)
     end
 end
 for iChannel = 1:size(device.outputChannel,2)
-    tmpInd=find(strcmp(device.info.analogOutput.channelNames,device.outputChannel(iChannel).id));
+    switch device.outputChannel(iChannel).type
+        case 'Voltage'
+            tmpInd=find(strcmp(device.info.analogOutput.channelNames,device.outputChannel(iChannel).id));
+        case 'Digital'
+            tmpInd=find(strcmp(device.info.digitalIO.channelNames,device.outputChannel(iChannel).id));
+        otherwise
+            error('Unknown device.outputChannel.type.')
+    end
     if isempty(tmpInd)
-        error(['Analog Output Channel with ID ' device.outputChannel(iChannel).id 'is not available on ' device.name])
+        error(['Output Channel with ID ' device.outputChannel(iChannel).id ' is not available on ' device.name])
     end
 end
 clear tmp*
@@ -291,11 +313,18 @@ for iChannel=1:size(device.inputChannel,2)
     handlerDeviceInput.Channels(device.inputChannelIndex(iChannel)).Name=device.inputChannel(iChannel).name;
 end
 
-%% Create Analog Output Handler
+%% Create Analog/Digital Output Handler
 handlerDeviceOutput=        daq(device.manufacturer);
 handlerDeviceOutput.Rate =  device.outputRate;
 for iChannel=1:size(device.outputChannel,2)
-    [~,device.outputChannelIndex(iChannel)]=addoutput(handlerDeviceOutput,device.name,device.outputChannel(iChannel).id,"Voltage");
+    switch device.outputChannel(iChannel).type
+        case 'Voltage'
+            [~,device.outputChannelIndex(iChannel)]=addoutput(handlerDeviceOutput,device.name,device.outputChannel(iChannel).id,"Voltage");
+        case 'Digital'
+            [~,device.outputChannelIndex(iChannel)]=addoutput(handlerDeviceOutput,device.name,device.outputChannel(iChannel).id,"Digital");
+        otherwise
+            error('Unknown device.outputChannel.type.')
+    end
     handlerDeviceOutput.Channels(device.outputChannelIndex(iChannel)).Name=device.outputChannel(iChannel).name;
 end
 
