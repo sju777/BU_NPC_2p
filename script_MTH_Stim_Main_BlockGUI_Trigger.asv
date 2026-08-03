@@ -1,5 +1,5 @@
 %% Prepare workspace
-clearvars; clc; daqreset;
+clearvars; clc; %daqreset;
 
 % Based on script_MTH_Stim_Main_BlockGUI.m.
 % Adds a 'trialTrigger' output on a digital line (device.outputChannel(3),
@@ -339,121 +339,116 @@ if exist(folder.fullfile,'file')
         fprintf('OVERWRITE');
     end
 end
-
-%%%%%%%%%%%%%% COMMENT BLOCK HERE (start)!! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%% Prepare DAQ system
-fprintf('\n\nPreparing DAQ system...')
-daqreset; clearvars handler*
-tmpInfo=daqlist(device.manufacturer);
-tmpInfo=tmpInfo(1,:)
-tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'AnalogInput'));
-device.info.analogInput.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
-tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'AnalogOutput'));
-device.info.analogOutput.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
-tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'DigitalIO'));
-device.info.digitalIO.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
-
-%% Perform consistency checks
-if size({device.inputChannel.id},2)~=size(unique({device.inputChannel.id}),2)
-    error('Analog Input Channel ID (device.inputChannel.id) must be unique');
-end
-if size({device.inputChannel.name},2)~=size(unique({device.inputChannel.name}),2)
-    error('Analog Input Channel Name (device.inputChannel.name) must be unique');
-end
-if size({device.outputChannel.id},2)~=size(unique({device.outputChannel.id}),2)
-    error('Analog Output Channel ID (device.outputChannel.id) must be unique');
-end
-if size({device.outputChannel.name},2)~=size(unique({device.outputChannel.name}),2)
-    error('Analog Output Channel Name (device.outputChannel.name) must be unique');
-end
-
-%% Check for correct Analog Input Channel and Output Channel assignment
-for iChannel = 1:size(device.inputChannel,2)
-    tmpInd=find(strcmp(device.info.analogInput.channelNames,device.inputChannel(iChannel).id));
-    if isempty(tmpInd)
-        error(['Analog Input Channel with ID ' device.inputChannel(iChannel).id ' is not available on ' device.name])
-    end
-end
-for iChannel = 1:size(device.outputChannel,2)
-    switch device.outputChannel(iChannel).type
-        case 'Voltage'
-            tmpInd=find(strcmp(device.info.analogOutput.channelNames,device.outputChannel(iChannel).id));
-        case 'Digital'
-            tmpInd=find(strcmp(device.info.digitalIO.channelNames,device.outputChannel(iChannel).id));
-        otherwise
-            error('Unknown device.outputChannel.type.')
-    end
-    if isempty(tmpInd)
-        error(['Output Channel with ID ' device.outputChannel(iChannel).id ' is not available on ' device.name])
-    end
-end
-clear tmp*
-
-%% Create Analog Input Handler
-handlerDeviceInput=         daq(device.manufacturer);
-handlerDeviceInput.Rate=    device.inputRate;
-for iChannel=1:size(device.inputChannel,2)
-    [~,device.inputChannelIndex(iChannel)]=addinput(handlerDeviceInput,device.name,device.inputChannel(iChannel).id,"Voltage");
-    handlerDeviceInput.Channels(device.inputChannelIndex(iChannel)).TerminalConfig="SingleEnded";
-    handlerDeviceInput.Channels(device.inputChannelIndex(iChannel)).Name=device.inputChannel(iChannel).name;
-end
-
-%% Create Analog/Digital Output Handler
-handlerDeviceOutput=        daq(device.manufacturer);
-handlerDeviceOutput.Rate =  device.outputRate;
-for iChannel=1:size(device.outputChannel,2)
-    switch device.outputChannel(iChannel).type
-        case 'Voltage'
-            [~,device.outputChannelIndex(iChannel)]=addoutput(handlerDeviceOutput,device.name,device.outputChannel(iChannel).id,"Voltage");
-        case 'Digital'
-            [~,device.outputChannelIndex(iChannel)]=addoutput(handlerDeviceOutput,device.name,device.outputChannel(iChannel).id,"Digital");
-        otherwise
-            error('Unknown device.outputChannel.type.')
-    end
-    handlerDeviceOutput.Channels(device.outputChannelIndex(iChannel)).Name=device.outputChannel(iChannel).name;
-end
-
-%% Load Analog Output to DAQ Card
-preload(handlerDeviceOutput,run.VOut);
-fprintf('done.')
-
-%%
-clc;
-fprintf('\n *** %s ***',folder.fullfile);
-fprintf('\nBackground Imaging Time Before Airpuff:  %0.0f s', trial.backgroundTime)
-fprintf('\nPost-trial recording time:               %0.0f s', trial.postTrialRecordTime)
-fprintf('\nNumber of trials:                        %d', trial.N)
-fprintf('\nTrial ITI range:                          %0.0f-%0.0f s', min(trial.iti), max(trial.iti))
-fprintf('\nTotal recording time:                    %0.0f s', run.tTotal)
-
-%% Wait for user input
-fprintf('\n\nPress any key to start run...'); pause
-
-%% Perform run
-fprintf('\nStarting analog input...')
-start(handlerDeviceInput,"Duration",seconds(run.tTotal+10));
-fprintf('\nPre-trial baseline');
-pause(trial.backgroundTime)
-fprintf('\nTrials...')
-% run.VOut already contains the full block sequence (see 'Build
-% per-trial-type waveforms...' above), so it is played once, not repeated.
-start(handlerDeviceOutput)
-pause(sum(trial.iti))
-stop(handlerDeviceOutput)
-fprintf('\nPost-trial recording time...')
-pause(trial.postTrialRecordTime)
-pause(10);
-fprintf('\nAcquistion finished.')
-%% Load analog input and save into mat file
-fprintf('\nReading analog input and save to file...')
-analogInput = read(handlerDeviceInput,"all");
-save(folder.fullfile,'analogInput','trial','trialType','stimulus','folder','device');
-fprintf('done.')
-fprintf('\nFinished.\n')
-daqreset; clearvars handler*
-
-%%%%%%%%%%%%%% COMMENT BLOCK HERE (end)!! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% %% Prepare DAQ system
+% fprintf('\n\nPreparing DAQ system...')
+% daqreset; clearvars handler*
+% tmpInfo=daqlist(device.manufacturer);
+% tmpInfo=tmpInfo(1,:)
+% tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'AnalogInput'));
+% device.info.analogInput.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
+% tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'AnalogOutput'));
+% device.info.analogOutput.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
+% tmpInd=find(strcmp({tmpInfo.DeviceInfo.Subsystems.SubsystemType},'DigitalIO'));
+% device.info.digitalIO.channelNames=tmpInfo.DeviceInfo.Subsystems(tmpInd).ChannelNames;
+%
+% %% Perform consistency checks
+% if size({device.inputChannel.id},2)~=size(unique({device.inputChannel.id}),2)
+%     error('Analog Input Channel ID (device.inputChannel.id) must be unique');
+% end
+% if size({device.inputChannel.name},2)~=size(unique({device.inputChannel.name}),2)
+%     error('Analog Input Channel Name (device.inputChannel.name) must be unique');
+% end
+% if size({device.outputChannel.id},2)~=size(unique({device.outputChannel.id}),2)
+%     error('Analog Output Channel ID (device.outputChannel.id) must be unique');
+% end
+% if size({device.outputChannel.name},2)~=size(unique({device.outputChannel.name}),2)
+%     error('Analog Output Channel Name (device.outputChannel.name) must be unique');
+% end
+%
+% %% Check for correct Analog Input Channel and Output Channel assignment
+% for iChannel = 1:size(device.inputChannel,2)
+%     tmpInd=find(strcmp(device.info.analogInput.channelNames,device.inputChannel(iChannel).id));
+%     if isempty(tmpInd)
+%         error(['Analog Input Channel with ID ' device.inputChannel(iChannel).id ' is not available on ' device.name])
+%     end
+% end
+% for iChannel = 1:size(device.outputChannel,2)
+%     switch device.outputChannel(iChannel).type
+%         case 'Voltage'
+%             tmpInd=find(strcmp(device.info.analogOutput.channelNames,device.outputChannel(iChannel).id));
+%         case 'Digital'
+%             tmpInd=find(strcmp(device.info.digitalIO.channelNames,device.outputChannel(iChannel).id));
+%         otherwise
+%             error('Unknown device.outputChannel.type.')
+%     end
+%     if isempty(tmpInd)
+%         error(['Output Channel with ID ' device.outputChannel(iChannel).id ' is not available on ' device.name])
+%     end
+% end
+% clear tmp*
+%
+% %% Create Analog Input Handler
+% handlerDeviceInput=         daq(device.manufacturer);
+% handlerDeviceInput.Rate=    device.inputRate;
+% for iChannel=1:size(device.inputChannel,2)
+%     [~,device.inputChannelIndex(iChannel)]=addinput(handlerDeviceInput,device.name,device.inputChannel(iChannel).id,"Voltage");
+%     handlerDeviceInput.Channels(device.inputChannelIndex(iChannel)).TerminalConfig="SingleEnded";
+%     handlerDeviceInput.Channels(device.inputChannelIndex(iChannel)).Name=device.inputChannel(iChannel).name;
+% end
+%
+% %% Create Analog/Digital Output Handler
+% handlerDeviceOutput=        daq(device.manufacturer);
+% handlerDeviceOutput.Rate =  device.outputRate;
+% for iChannel=1:size(device.outputChannel,2)
+%     switch device.outputChannel(iChannel).type
+%         case 'Voltage'
+%             [~,device.outputChannelIndex(iChannel)]=addoutput(handlerDeviceOutput,device.name,device.outputChannel(iChannel).id,"Voltage");
+%         case 'Digital'
+%             [~,device.outputChannelIndex(iChannel)]=addoutput(handlerDeviceOutput,device.name,device.outputChannel(iChannel).id,"Digital");
+%         otherwise
+%             error('Unknown device.outputChannel.type.')
+%     end
+%     handlerDeviceOutput.Channels(device.outputChannelIndex(iChannel)).Name=device.outputChannel(iChannel).name;
+% end
+%
+% %% Load Analog Output to DAQ Card
+% preload(handlerDeviceOutput,run.VOut);
+% fprintf('done.')
+% 
+% %%
+% clc;
+% fprintf('\n *** %s ***',folder.fullfile);
+% fprintf('\nBackground Imaging Time Before Airpuff:  %0.0f s', trial.backgroundTime)
+% fprintf('\nPost-trial recording time:               %0.0f s', trial.postTrialRecordTime)
+% fprintf('\nNumber of trials:                        %d', trial.N)
+% fprintf('\nTrial ITI range:                          %0.0f-%0.0f s', min(trial.iti), max(trial.iti))
+% fprintf('\nTotal recording time:                    %0.0f s', run.tTotal)
+% 
+% %% Wait for user input
+% fprintf('\n\nPress any key to start run...'); pause
+% 
+% %% Perform run
+% fprintf('\nStarting analog input...')
+% start(handlerDeviceInput,"Duration",seconds(run.tTotal+10));
+% fprintf('\nPre-trial baseline');
+% pause(trial.backgroundTime)
+% fprintf('\nTrials...')
+% % run.VOut already contains the full block sequence (see 'Build
+% % per-trial-type waveforms...' above), so it is played once, not repeated.
+% start(handlerDeviceOutput)
+% pause(sum(trial.iti))
+% stop(handlerDeviceOutput)
+% fprintf('\nPost-trial recording time...')
+% pause(trial.postTrialRecordTime)
+% pause(10);
+% fprintf('\nAcquistion finished.')
+% %% Load analog input and save into mat file
+% fprintf('\nReading analog input and save to file...')
+% analogInput = read(handlerDeviceInput,"all");
+% save(folder.fullfile,'analogInput','trial','trialType','stimulus','folder','device');
+% fprintf('done.')
+% fprintf('\nFinished.\n')
+% daqreset; clearvars handler*
 
 %% Local functions (waveform helper + block design GUI + presets)
 function v = generateSinglePulse(nSamples, outputRate, delay, duration, amplitude)
