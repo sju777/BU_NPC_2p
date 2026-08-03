@@ -15,7 +15,7 @@ clearvars; clc; daqreset;
 %% Folder
 % Filename will be generated as 'root\date\animal\trigger\Run00X_info.mat'
 folder.root='C:\Data\test1';
-folder.date='26-08-03';     % (use YY-MM-DD)
+folder.date='26-08-02';     % (use YY-MM-DD)
 folder.animal='test1';
 folder.run= 1; % (needs to be a number)
 folder.info='test'; 
@@ -68,7 +68,7 @@ run.tTotal=trial.backgroundTime+trial.N*trial.ISI+trial.postTrialRecordTime;
 
 stimulus(2).name='airpuff';
 stimulus(2).type='rect';
-stimulus(2).delay=0;
+stimulus(2).delay=1;
 stimulus(2).pulseWidth=10e-3;           % (in s)
 stimulus(2).frequency=3;                % (in Hz)
 stimulus(2).duration=2;                 % (in s)
@@ -86,7 +86,7 @@ stimulus(2).amplitude=5;                % (in V)
 stimulus(1).name='audio';
 stimulus(1).type='tone';                % options: rect, tone
 stimulus(1).delay=0;                    % delay (in s) from trial start to tone onset
-stimulus(1).toneFrequency=5000;        % carrier frequency (in Hz) of the tone
+stimulus(1).toneFrequency=12000;        % carrier frequency (in Hz) of the tone
 stimulus(1).duration=1;               % duration (in s) of the tone
 stimulus(1).amplitude=5;                % amplitude (in V) of the tone
 stimulus(1).rampTime=0;              % (in s) linear on/off ramp to avoid clicks
@@ -162,8 +162,11 @@ for iStimulus=1:size(stimulus,2)
                 tmpStimStart=stimulus(iStimulus).delay*device.outputRate+1;
                 tmpNSamples=round(stimulus(iStimulus).duration*device.outputRate);
                 tmpT=(0:tmpNSamples-1)/device.outputRate;
-
-                tmpTone=stimulus(iStimulus).amplitude*sin(2*pi*stimulus(iStimulus).toneFrequency*tmpT)';
+                %ourOwnPi=long(pi);
+                % for iT=1:size(tmpT,2)
+                %     tmpTone(iT)=5*sin(5000*tmpT(iT));
+                % end
+                tmpTone=stimulus(iStimulus).amplitude.*sin(2*3.14*stimulus(iStimulus).toneFrequency.*tmpT)';
 
                 tmpRampSamples=round(stimulus(iStimulus).rampTime*device.outputRate);
 
@@ -173,7 +176,8 @@ for iStimulus=1:size(stimulus,2)
                     tmpTone(end-tmpRampSamples+1:end)=tmpTone(end-tmpRampSamples+1:end).*flipud(tmpRamp);
                 end
                 tmpStimEnd=tmpStimStart+tmpNSamples-1;
-                run.VTrial(tmpStimStart:tmpStimEnd,tmpInd)=tmpTone;
+                %run.VTrial(tmpStimStart:tmpStimEnd,tmpInd)=tmpTone;
+                run.VOut(tmpStimStart:tmpStimEnd,tmpInd)=tmpTone;
                 if tmpStimEnd>size(run.tTrial,2)
                     error('Stimulus is longer than trial ISI.')
                 end
